@@ -4,3 +4,4 @@ util_logs
 *.bc
 build/
 test-utils.sh
+py_scripts/*.log
