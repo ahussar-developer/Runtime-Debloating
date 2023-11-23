@@ -1,0 +1,6 @@
+*.log
+util_logs
+*.ll
+*.bc
+build/
+test-utils.sh
