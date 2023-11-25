@@ -1,7 +1,8 @@
+#!/usr/bin/env python3
 import os
 import subprocess
-import re
 from itertools import chain
+import argparse
 
 def generate_tags(folder_path):
     # Run ctags to generate a tags file
@@ -49,22 +50,36 @@ def flatten_list(lst):
 
 
 def main():
-    folder_path = '/home/user/test/nginx-1.24.0/src/'
+    #folder_path = '/home/user/test/nginx-1.24.0/src/'
+    #pin_funcs_file = "/home/user/passes/pass_files/orig_nginx_pin.log"
+    #llvm_runtime_funcs = "/home/user/test/nginx-1.24.0/ORIGINAL_FUNC_TRACE.txt"
+    
+    # Set up argument parser
+    parser = argparse.ArgumentParser(description='Extract and match functions from source files using ctags. It also outputs src_assoc_py_matched_funcs.txt'
+                                     'which contains all extra functions not in the traces found in all the utilized c files from the source.')
+
+    # Define command-line arguments
+    parser.add_argument('-src-dir', dest='folder_path', required=True, help='Path to the source code directory.')
+    parser.add_argument('-pin-trace', dest='pin_funcs_file', required=True, help='Path to the PIN trace file.')
+    parser.add_argument('-llvm-trace', dest='llvm_runtime_funcs', required=True, help='Path to the LLVM runtime trace file.')
+
+    # Parse the command-line arguments
+    args = parser.parse_args()
+    
     tags_path = '/home/user/passes/py_scripts/tags'
 
     # Generate tags file using ctags
-    generate_tags(folder_path)
+    generate_tags(args.folder_path)
 
     # Extract functions from the tags file
     function_dict = extract_functions_from_tags(tags_path)
     for f, path in function_dict.items():
         print(f)
-    pin_funcs_file = "/home/user/passes/py_scripts/orig_nginx_pin.log"
-    llvm_runtime_funcs = "/home/user/passes/missed_runtime_funcs.log"
+    
     # List of functions to match
-    function_list_1 = read_function_list(pin_funcs_file)
+    function_list_1 = read_function_list(args.pin_funcs_file)
     #print(function_list_1)
-    function_list_2 = read_function_list(llvm_runtime_funcs)
+    function_list_2 = read_function_list(args.llvm_runtime_funcs)
     #print(function_list_2)
     
     # Match functions from the first file with their corresponding source files
@@ -103,12 +118,14 @@ def main():
                 all_functions.append(func)
                 #print(func)
 
-    all_functions = list(set(all_functions))
-    #for f in all_functions:
-    #    print(f)
+    all_functions = set(all_functions)
+    func1_set = set(matched_functions_1)
+    func2_set = set(matched_functions_2)
     
-    with open('enable_functions.txt', 'w') as enable_file:
-        enable_file.write('\n'.join(all_functions))
+    filtered_functions = all_functions - (func1_set.union(func2_set))
+    
+    with open('src_assoc_py_matched_funcs.txt', 'w') as enable_file:
+        enable_file.write('\n'.join(filtered_functions))
 
 if __name__ == "__main__":
     main()
