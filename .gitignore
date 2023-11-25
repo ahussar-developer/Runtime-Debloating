@@ -5,3 +5,5 @@ util_logs
 build/
 test-utils.sh
 py_scripts/*.log
+py_scripts/*.txt
+py_scripts/tags

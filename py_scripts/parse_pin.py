@@ -18,13 +18,15 @@ def parse_file(file_path, target_image):
 
 file_path = '/home/user/test/nginx-1.24.0/proccount.out'
 target_image = 'nginx'
+#file_path = '/home/user/passes/proccount.out'
+#target_image = 'tmp.exe'
 
 procedures = parse_file(file_path, target_image)
 
 output_file = 'nginx_pin.log'
 if os.path.exists(output_file):
     os.remove(output_file)
-    
+
 with open(output_file, 'a') as new_file:
     for procedure in procedures:
         print(procedure)
