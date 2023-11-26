@@ -16,18 +16,15 @@ public:
   llvm::PreservedAnalyses run(llvm::Module &M, llvm::ModuleAnalysisManager &MAM);
   
 
-  std::vector<std::string> traced_func_names;
+  std::set<std::string> traced_func_names;
   std::set<llvm::Function *> traced_funcs;
-  std::vector<std::string> missed_runtime_func_names;
-  std::set<llvm::Function *> missed_runtime_funcs;
-  std::vector<std::string> static_module_func_names;
+  std::set<std::string> static_module_func_names;
   std::set<llvm::Function *> static_module_funcs;
   
 
   std::map<std::string, std::vector<llvm::Instruction *>> del_insts;
 
   bool initTracedFuncNames();
-  bool initMissedRuntimeFuncNames();
   bool initStaticModuleFuncNames();
   bool removeNonTracedFuncs(llvm::Module &M, llvm::ModuleAnalysisManager &MAM);
   void getCallsTo(std::set<llvm::Function *> funcs_to_delete, llvm::Module &M);

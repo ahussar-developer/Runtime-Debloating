@@ -38,7 +38,7 @@ function debloat_nginx(){
     ## Run pass on nginx/objs/nginx.0.0.preopt.bc
     #opt -O3 ../test/nginx-1.24.0/objs/nginx.0.0.preopt.bc -o ../test/nginx-1.24.0/objs/nginx_O3.bc
     ## To run with debug messages: add -my-debug after --passes=..
-    opt -load-pass-plugin build/DebloatPass/libDebloatPass.so --passes="debloat" -my-debug ../test/nginx-1.24.0/objs/nginx.0.0.preopt.bc -o ../test/nginx-1.24.0/objs/nginx_pass.bc 2> nginx-pass.log
+    opt -load-pass-plugin build/DebloatPass/libDebloatPass.so --passes="debloat" -printf-all ../test/nginx-1.24.0/objs/nginx.0.0.preopt.bc -o ../test/nginx-1.24.0/objs/nginx_pass.bc 2> nginx-pass.log
     
     mkdir -p logs
     #mv nginx-pass.log logs/

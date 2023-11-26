@@ -61,7 +61,9 @@ def main():
     click_link(driver, "work")
     click_link(driver, "about")
 
-    # Perform any other actions as needed
+    # TO DO: Fill out Contact form. Submit and Clear it for testing
+    
+    # To DO: Select external links
 
     # Close the browser
     driver.quit()

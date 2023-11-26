@@ -83,7 +83,6 @@ void clearLogs() {
 bool DebloatPass::runOnModule(llvm::Module &M, llvm::ModuleAnalysisManager &MAM){
   clearLogs();
   initTracedFuncNames();
-  initMissedRuntimeFuncNames();
   initStaticModuleFuncNames();
   removeNonTracedFuncs(M, MAM);
   #ifdef DEBUG
@@ -96,6 +95,7 @@ bool DebloatPass::runOnModule(llvm::Module &M, llvm::ModuleAnalysisManager &MAM)
   }
   #ifdef DEBUG
   logDecFunctions(M);
+  //printfAllFuncs(M);
   #endif
   #ifdef PRINTFALL
   printfAllFuncs(M);
@@ -149,15 +149,11 @@ void DebloatPass::printfAllFuncs(llvm::Module &M) {
     std::string name = F.getName().str();
     std::string final_str;
     auto it = traced_funcs.find(&F);
-    auto it2 = missed_runtime_funcs.find(&F);
     auto it3 = static_module_funcs.find(&F);
     if (it != traced_funcs.end()) {
         // F is in traced_funcs
         final_str = name + "-- KEPT";
     } 
-    else if (it2 != missed_runtime_funcs.end()) {
-      final_str = name + "-- KEPT";
-    }
     else if (it3 != static_module_funcs.end()) {
       final_str = name + "-- KEPT";
     }
@@ -325,16 +321,7 @@ bool DebloatPass::removeNonTracedFuncs(llvm::Module &M, llvm::ModuleAnalysisMana
     if (F.isDeclaration())
       continue;
 
-    // Check if the function name is in the traced_func_names vector
-    if (std::find(missed_runtime_func_names.begin(), missed_runtime_func_names.end(), F.getName()) != missed_runtime_func_names.end()) {
-      // TO DO: Remove this when find a way to autmatically do this
-      #ifdef DEBUG
-      errs() << "Runtime: " << F.getName().str() << "\n";
-      #endif
-      missed_runtime_funcs.insert(&F);
-      continue;
-    } 
-    else if (std::find(traced_func_names.begin(), traced_func_names.end(), F.getName()) != traced_func_names.end()) {
+    if (std::find(traced_func_names.begin(), traced_func_names.end(), F.getName()) != traced_func_names.end()) {
       // Match found
       #ifdef DEBUG
       errs() << "Original trace: " << F.getName().str() << "\n";
@@ -360,29 +347,22 @@ bool DebloatPass::removeNonTracedFuncs(llvm::Module &M, llvm::ModuleAnalysisMana
       traced_funcs.insert(&F);
       continue;
     }
-    //else if (F.getName().str().find("http") != std::string::npos){
-      //keep logging related functions
-      //traced_funcs.insert(&F);
-      //continue;
-    //}
     else{
       funcs_to_delete.insert(F.getName().str());
       continue;
     }
 	}
 
-  #ifdef DEBUG
+  #if defined(DEBUG) || defined(PRINTFALL)  
   // Display deleted function names
   /*errs() << "Functions of traced_funcs:\n";
   for (auto Func : funcs_to_delete) {
       errs() << Func->getName().str() << "\n";
   }*/
   errs() << "Num functions to erase: " << funcs_to_delete.size() << "\n";
-  errs() << "Num runtime funcs: " << missed_runtime_funcs.size() << "\n";
   errs() << "Num traced funcs: " << traced_funcs.size() << "\n";
   errs() << "Num static module funcs: " << static_module_funcs.size() << "\n";
   logTracedFunctions(traced_funcs);
-  logTracedFunctions(missed_runtime_funcs);
   #endif
 
   //getCallsTo_DefUse(funcs_to_delete, M);
@@ -470,7 +450,7 @@ bool DebloatPass::removeNonTracedFuncs(llvm::Module &M, llvm::ModuleAnalysisMana
 }
 
 bool DebloatPass::initStaticModuleFuncNames(){
-  std::string file_path = "/home/user/passes/py_scripts/static_funcs.txt";
+  std::string file_path = "/home/user/passes/pass_files/static_funcs.txt";
 
   // Open the file
   std::ifstream file(file_path);
@@ -485,57 +465,21 @@ bool DebloatPass::initStaticModuleFuncNames(){
   std::string line;
   while (std::getline(file, line)) {
       // Add each line (function name) to the vector
-      static_module_func_names.push_back(line);
+      static_module_func_names.insert(line);
   }
 
   // Close the file
   file.close();
 
   #ifdef DEBUG
-  /*
-  errs() << "Function Names of missed_runtime_func_names:\n";
-  for (const auto& name : missed_runtime_func_names) {
-      errs() << name << "\n";
-  }*/
-  #endif
-  return true;
-}
 
-bool DebloatPass::initMissedRuntimeFuncNames() {
-  std::string file_path = "/home/user/passes/unique_missed_runtime_funcs.log";
-
-  // Open the file
-  std::ifstream file(file_path);
-
-  // Check if the file is opened successfully
-  if (!file.is_open()) {
-      errs() << "Error opening file: " << file_path << "\n";
-      return false;
-  }
-
-  // Read the file line by line
-  std::string line;
-  while (std::getline(file, line)) {
-      // Add each line (function name) to the vector
-      missed_runtime_func_names.push_back(line);
-  }
-
-  // Close the file
-  file.close();
-
-  #ifdef DEBUG
-  /*
-  errs() << "Function Names of missed_runtime_func_names:\n";
-  for (const auto& name : missed_runtime_func_names) {
-      errs() << name << "\n";
-  }*/
   #endif
   return true;
 }
 
 bool DebloatPass::initTracedFuncNames() {
-  std::string file_path = "/home/user/passes/py_scripts/orig_nginx_pin.log";
-
+  std::string file_path = "/home/user/passes/pass_files/orig_nginx_pin.log";
+  std::string file_path2 = "/home/user/passes/pass_files/orig_nginx_llvm.log";
   // Open the file
   std::ifstream file(file_path);
 
@@ -549,18 +493,30 @@ bool DebloatPass::initTracedFuncNames() {
   std::string line;
   while (std::getline(file, line)) {
       // Add each line (function name) to the vector
-      traced_func_names.push_back(line);
+      traced_func_names.insert(line);
   }
 
   // Close the file
   file.close();
 
-  #ifdef DEBUG
-  /*errs() << "Function Names of traced_func_names:\n";
-  for (const auto& name : traced_func_names) {
-      errs() << name << "\n";
-  }*/
-  #endif
+  std::ifstream file2(file_path2);
+
+  // Check if the file is opened successfully
+  if (!file2.is_open()) {
+      std::cerr << "Error opening file: " << file_path2 << std::endl;
+      return false;
+  }
+
+  // Read the file line by line
+  std::string line2;
+  while (std::getline(file2, line2)) {
+      // Add each line (function name) to the vector
+      traced_func_names.insert(line2);
+  }
+
+  // Close the file
+  file2.close();
+
   return true;
 }
 
