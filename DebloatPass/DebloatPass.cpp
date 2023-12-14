@@ -14,27 +14,40 @@
 #include "llvm/IR/GlobalValue.h"
 #include "llvm/IR/Verifier.h"
 #include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/Instructions.h"
 
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Support/CommandLine.h"
+#include "llvm/Support/Timer.h"
+
+#include "llvm/Analysis/CallGraph.h"
+#include "llvm/IR/Function.h"
+#include "llvm/Pass.h"
+#include "llvm/Support/GraphWriter.h"
+#include "llvm/Analysis/LoopInfo.h"
+#include "llvm/Analysis/LoopPass.h"
+#include "llvm/ADT/SCCIterator.h"
 
 #include <algorithm>
 #include <filesystem>
+#include <iostream>
+#include <fstream>
+#include <sstream>
+#include <unordered_map>
+#include <algorithm>
+#include <cmath>
 
 using namespace llvm;
 
 static cl::opt<bool> mydebug("my-debug", cl::desc("Enable errs() print statements"), cl::init(false));
-#define DEBUG mydebug
+#define MYDEBUG mydebug
 
-static cl::opt<bool> printfall("printf-all", cl::desc("Enable printf statements for all functions"), cl::init(false));
-#define PRINTFALL printfall
-
-//This cannot be ran at teh same time as printf-all and vice versa
-static cl::opt<bool> printfdel("printf-del", cl::desc("Enable printf statements for deleted functions"), cl::init(false));
-#define PRINTFDEL printfdel
+//static cl::opt<bool> printfall("printf-all", cl::desc("Enable printf statements for all functions"), cl::init(false));
+//#define PRINTFALL printfall
 
 PreservedAnalyses DebloatPass::run(llvm::Module &M, llvm::ModuleAnalysisManager &MAM){
-  #ifdef DEBUG
-  errs() << "Verbose debug messages enabled.\n";
+  #ifdef MYDEBUG
+  //errs() << "Verbose debug messages enabled.\n";
   #endif
 
   bool changed = runOnModule(M, MAM);
@@ -51,55 +64,100 @@ void clearLogs() {
 
   try {
       fs::remove(filename);
-      #ifdef DEBUG
+      #ifdef MYDEBUG
       errs() << "declaration_functions.log successfully deleted\n";
       #endif
   } catch (const std::filesystem::filesystem_error& e) {
-      #ifdef DEBUG
-      errs() << "Error deleting file: " << e.what() << "\n";
+      #ifdef MYDEBUG
+      //errs() << "Error deleting file: " << e.what() << "\n";
       #endif
   }
   try {
       fs::remove(filename2);
-      #ifdef DEBUG
-      errs() << "kept_functions.log successfully deleted\n";
+      #ifdef MYDEBUG
+      //errs() << "kept_functions.log successfully deleted\n";
       #endif
   } catch (const std::filesystem::filesystem_error& e) {
-      #ifdef DEBUG
-      errs() << "Error deleting file: " << e.what() << "\n";
+      #ifdef MYDEBUG
+      //errs() << "Error deleting file: " << e.what() << "\n";
       #endif
   }
   try {
       fs::remove(filename3);
-      #ifdef DEBUG
-      errs() << "deleted_functions.log successfully deleted\n";
+      #ifdef MYDEBUG
+      //errs() << "deleted_functions.log successfully deleted\n";
       #endif
   } catch (const std::filesystem::filesystem_error& e) {
-      #ifdef DEBUG
-      errs() << "Error deleting file: " << e.what() << "\n";
+      #ifdef MYDEBUG
+      //errs() << "Error deleting file: " << e.what() << "\n";
       #endif
   }
 }
+
+void compareSets(std::set<std::string> set1, std::set<std::string> set2){
+  // Create a set to store the common functions
+  std::set<std::string> common;
+
+  // Use std::set_intersection to find common elements
+  std::set_intersection(set1.begin(), set1.end(), set2.begin(), set2.end(),
+                        std::inserter(common, common.begin()));
+
+  // Output the common functions
+  //errs() << "Common functions: ";
+  //for (const auto& functionName : common) {
+  //    errs() << functionName << " ";
+  //}
+  //errs() << "\n";
+
+  // Output the number of common functions
+  errs() << "Set1: " << set1.size() << "\n";
+  errs() << "Set2: " << set1.size() << "\n";
+  errs() << "Number of common functions: " << common.size() << "\n";
+}
+
 bool DebloatPass::runOnModule(llvm::Module &M, llvm::ModuleAnalysisManager &MAM){
+  bool nginx = true;
+  bool thttpd = false;
+  Timer TimerObj1("PassTimer", "Timer for Complete Pass");
+  Timer TimerObj2("CycloTimer", "Timer for Cyclo function");
+  TimerObj1.startTimer();
   clearLogs();
-  initTracedFuncNames();
-  initStaticModuleFuncNames();
+  initTracedFuncNames(nginx);
+  initStaticModuleFuncNames(nginx);
+  //initTracedFuncNames(thttpd);
+  //initStaticModuleFuncNames(thttpd);
+  
+  //TO DO: RE-add after gadget experiment
+  //TimerObj2.startTimer();
+  //calculateFuncCycloComplexity(M);
+  //TimerObj2.stopTimer();
+  //calculateCycloStats();
+
+  //--//getControlDeps(M);
+  //--//findSCCs(M);
+  //--//compareSets(traced_func_names, scc_func_names);
+
+
   removeNonTracedFuncs(M, MAM);
-  #ifdef DEBUG
-  errs() << "Finished removal. Checking module\n";
+  #ifdef MYDEBUG
+  //errs() << "Finished removal. Checking module\n";
   #endif
   if (!verifyModule(M, &errs())) {
     errs() << "Module is well-formed.\n";
   } else {
       errs() << "Module has errors!\n";
   }
-  #ifdef DEBUG
+  #ifdef MYDEBUG
   logDecFunctions(M);
   //printfAllFuncs(M);
   #endif
-  #ifdef PRINTFALL
-  printfAllFuncs(M);
-  #endif
+  //printfAllFuncs(M);
+  TimerObj1.stopTimer();
+  double ElapsedTime1 = TimerObj1.getTotalTime().getWallTime();
+  double ElapsedTime2 = TimerObj2.getTotalTime().getWallTime();
+
+  errs() << "Pass Timer: " << ElapsedTime1 << "\n";
+  errs() << "Cyclo Timer: " << ElapsedTime2 << "\n";
 
   return false;
 }
@@ -132,7 +190,7 @@ void DebloatPass::printfAllFuncs(llvm::Module &M) {
   // STEP 2: Inject a global variable that will hold the printf format string
   // ------------------------------------------------------------------------
   llvm::Constant *PrintfFormatStr = llvm::ConstantDataArray::getString(
-      CTX, "%s\n\tArgs=%d\n");
+      CTX, "%s\n");
 
   Constant *PrintfFormatStrVar =
       M.getOrInsertGlobal("PrintfFormatStr", PrintfFormatStr->getType());
@@ -214,8 +272,8 @@ bool getReturnInstruction(Function *F, Type *retType) {
     ReturnInst *ret =  ReturnInst::Create(context, ConstantPointerNull::get(ptr_type), BB);
     return true;
   }
-  #ifdef DEBUG
-  errs() << "Unidentifiable Return Type. Reutrning a void return inst\n";
+  #ifdef MYDEBUG
+  //errs() << "Unidentifiable Return Type. Reutrning a void return inst\n";
   #endif
   ReturnInst *ret =  ReturnInst::Create(context, BB);
   return false;
@@ -223,31 +281,21 @@ bool getReturnInstruction(Function *F, Type *retType) {
 }
 
 void DebloatPass::destroyFunction(llvm::Function *F/*, Constant *PrintfFormatStrVar, PointerType *PrintfArgTy, FunctionCallee Printf*/){
-  #ifdef DEBUG
-  errs() << "\tDestroying\n";
+  #ifdef MYDEBUG
+  //errs() << "\tDestroying\n";
   #endif
   // Removes all references to this function from other instructions
   F->dropAllReferences();
   // Make sure function cannot be accessed from outside this module
   F->setLinkage(GlobalValue::InternalLinkage);
   bool success = getReturnInstruction(F, F->getReturnType());
-  #ifdef DEBUG
+  #ifdef MYDEBUG
   if (success){
     //errs() << "succesfully added a ret instruction.\n";
   } else {
     errs() << "Failed to create a valid ret instrcution.\n";
   }
   #endif
-  /*
-  #ifdef PRINTFDEL
-  IRBuilder<> Builder(&*F->getEntryBlock().getFirstInsertionPt());
-  auto FuncName = Builder.CreateGlobalStringPtr(F->getName());
-  llvm::Value *FormatStrPtr =
-        Builder.CreatePointerCast(PrintfFormatStrVar, PrintfArgTy, "formatStr");
-  Builder.CreateCall(
-        Printf, {FormatStrPtr, FuncName, Builder.getInt32(F->arg_size())});
-  #endif
-  */
 }
 
 void DebloatPass::logDeletedFunctions(std::set<std::string> funcs_to_delete){
@@ -274,44 +322,7 @@ void logTracedFunctions(std::set<llvm::Function *> funcs){
 
 bool DebloatPass::removeNonTracedFuncs(llvm::Module &M, llvm::ModuleAnalysisManager &MAM){
   bool modified = false;
-  /*
-  #ifdef PRINTFDEL
-  // Init printf
-  auto &CTX = M.getContext();
-  PointerType *PrintfArgTy = PointerType::getUnqual(Type::getInt8Ty(CTX));
-
-  // STEP 1: Inject the declaration of printf
-  // ----------------------------------------
-  // Create (or _get_ in cases where it's already available) the following
-  // declaration in the IR module:
-  //    declare i32 @printf(i8*, ...)
-  // It corresponds to the following C declaration:
-  //    int printf(char *, ...)
-  FunctionType *PrintfTy = FunctionType::get(
-      IntegerType::getInt32Ty(CTX),
-      PrintfArgTy,
-      true);
-
-  FunctionCallee Printf = M.getOrInsertFunction("printf", PrintfTy);
-
-  // Set attributes as per inferLibFuncAttributes in BuildLibCalls.cpp
-  Function *PrintfF = dyn_cast<Function>(Printf.getCallee());
-  PrintfF->setDoesNotThrow();
-  PrintfF->addParamAttr(0, Attribute::NoCapture);
-  PrintfF->addParamAttr(0, Attribute::ReadOnly);
-
-
-  // STEP 2: Inject a global variable that will hold the printf format string
-  // ------------------------------------------------------------------------
-  llvm::Constant *PrintfFormatStr = llvm::ConstantDataArray::getString(
-      CTX, "Calling a deleted function:%s\n");
-
-  Constant *PrintfFormatStrVar =
-      M.getOrInsertGlobal("PrintfFormatStr", PrintfFormatStr->getType());
-  dyn_cast<GlobalVariable>(PrintfFormatStrVar)->setInitializer(PrintfFormatStr);
-  #endif
-  */
-
+ 
   std::set<std::string> funcs_to_delete;
   // Iterate over functions in the module
 
@@ -323,28 +334,38 @@ bool DebloatPass::removeNonTracedFuncs(llvm::Module &M, llvm::ModuleAnalysisMana
 
     if (std::find(traced_func_names.begin(), traced_func_names.end(), F.getName()) != traced_func_names.end()) {
       // Match found
-      #ifdef DEBUG
-      errs() << "Original trace: " << F.getName().str() << "\n";
+      #ifdef MYDEBUG
+      //errs() << "Original trace: " << F.getName().str() << "\n";
       #endif
       traced_funcs.insert(&F);
       continue;
     } 
     else if (std::find(static_module_func_names.begin(), static_module_func_names.end(), F.getName()) != static_module_func_names.end()) {
       // Match found
-      #ifdef DEBUG
-      errs() << "Static Module: " << F.getName().str() << "\n";
+      #ifdef MYDEBUG
+      //errs() << "Static Module: " << F.getName().str() << "\n";
       #endif
       static_module_funcs.insert(&F);
       continue;
     } 
+    else if (std::find(cyclo_func_names.begin(), cyclo_func_names.end(), F.getName()) != cyclo_func_names.end()) {
+      // Match found
+      #ifdef MYDEBUG
+      //errs() << "Cyclo Complexity: " << F.getName().str() << "\n";
+      #endif
+      cyclo_funcs.insert(&F);
+      continue;
+    } 
     else if (F.getName().str().find("error") != std::string::npos){
       //keep error related functions
-      traced_funcs.insert(&F);
+      // TO DO: Add back after gadget experiment
+      //traced_funcs.insert(&F);
       continue;
     }
     else if (F.getName().str().find("log") != std::string::npos){
       //keep logging related functions
-      traced_funcs.insert(&F);
+      // TO DO: Add back after gadget experiment
+      //traced_funcs.insert(&F);
       continue;
     }
     else{
@@ -353,7 +374,7 @@ bool DebloatPass::removeNonTracedFuncs(llvm::Module &M, llvm::ModuleAnalysisMana
     }
 	}
 
-  #if defined(DEBUG) || defined(PRINTFALL)  
+  #ifdef MYDEBUG 
   // Display deleted function names
   /*errs() << "Functions of traced_funcs:\n";
   for (auto Func : funcs_to_delete) {
@@ -368,96 +389,66 @@ bool DebloatPass::removeNonTracedFuncs(llvm::Module &M, llvm::ModuleAnalysisMana
   //getCallsTo_DefUse(funcs_to_delete, M);
   
   int i = 0;
-  errs() << "funcs_to_delete:\n";
+  //errs() << "funcs_to_delete:\n";
   for (auto func_name : funcs_to_delete) {
-    errs() << func_name << "\n";
+    //errs() << func_name << "\n";
     Function *F = M.getFunction(func_name);
-    #ifdef DEBUG
+    #ifdef MYDEBUG
     if (i%100 == 0){
-      errs() << "Erased " << i << " functions.\n";
+      //errs() << "Erased " << i << " functions.\n";
     }
     #endif
     if (!F){
-      #ifdef DEBUG
-      errs() << "F is null. Cannot delete\n";
+      #ifdef MYDEBUG
+      //errs() << "F is null. Cannot delete\n";
       #endif
       continue;
     }
     if (F->getName().empty()) {
-      #ifdef DEBUG
-      errs() << "No named function. Cannot delete\n";
+      #ifdef MYDEBUG
+      //errs() << "No named function. Cannot delete\n";
       #endif
       continue;
     }
-    #ifdef DEBUG
-    errs() << "Erasing --" << F->getName().str() << "--\n";
+    #ifdef MYDEBUG
+    //errs() << "Erasing --" << F->getName().str() << "--\n";
     #endif
-    //destroyFunction(F, PrintfFormatStrVar, PrintfArgTy, Printf);
     destroyFunction(F);
-
-    //slowCallDeletion(F, M);
-    //deleteCallsTo_DefUse(F->getName().str());
-    //deleteCallsTo(F->getName().str());
-    //removes all uses of the function and the function itself
-    /*
-    for (User* U : F->users()) {
-      CallBase   *CB = dyn_cast<CallBase>(U);
-      CallInst   *CI = dyn_cast<CallInst>(U);
-      InvokeInst *II = dyn_cast<InvokeInst>(U);
-      if(CB){
-        if (CI) {
-          #ifdef DEBUG
-          //errs() << "Erasing use" << *CI << "...\n";
-          errs() << "Erasing use...\n";
-          #endif
-          //CI->eraseFromParent(); // Remove the call instruction
-          CI->deleteValue();
-          CI = nullptr;
-        }
-        if (II){
-          #ifdef DEBUG
-          //errs() << "Erasing use" << *II << "...\n";
-          errs() << "Erasing use...\n";
-          #endif
-          //II->eraseFromParent(); // Remove the call instruction
-          
-          II->deleteValue();
-          II = nullptr;
-        }
-      }
-    }
-    F->clearMetadata();
-    F->eraseFromParent();
-    */
     
     
-    #ifdef DEBUG
+    #ifdef MYDEBUG
     //errs() << "Erased\n";
     #endif
     i++;
     modified = true;
   }
   
-  #ifdef DEBUG
-  errs() << "Running DCE & Strip passes\n";
+  #ifdef MYDEBUG
+  //errs() << "Running DCE & Strip passes\n";
   #endif
   GlobalDCEPass().run(M, MAM);
   StripDeadPrototypesPass().run(M, MAM);
-  #ifdef DEBUG
+  #ifdef MYDEBUG
   logDeletedFunctions(funcs_to_delete);
   #endif
   return modified;
 }
 
-bool DebloatPass::initStaticModuleFuncNames(){
-  std::string file_path = "/home/user/passes/pass_files/static_funcs.txt";
+bool DebloatPass::initStaticModuleFuncNames(bool nginx){
+  std::string dir = "/home/user/passes/pass_files/";
+  if (nginx) {
+    dir += "nginx/";
+  } else {
+    dir += "thttpd/";
+  }
 
+  std::string file_path = dir + "static_funcs_all_tests.txt";
   // Open the file
   std::ifstream file(file_path);
 
   // Check if the file is opened successfully
   if (!file.is_open()) {
-      errs() << "Error opening file: " << file_path << "\n";
+      //errs() << "Error opening file: " << file_path << "\n";
       return false;
   }
 
@@ -471,15 +462,24 @@ bool DebloatPass::initStaticModuleFuncNames(){
   // Close the file
   file.close();
 
-  #ifdef DEBUG
+  #ifdef MYDEBUG
 
   #endif
   return true;
 }
 
-bool DebloatPass::initTracedFuncNames() {
-  std::string file_path = "/home/user/passes/pass_files/orig_nginx_pin.log";
-  std::string file_path2 = "/home/user/passes/pass_files/orig_nginx_llvm.log";
+bool DebloatPass::initTracedFuncNames(bool nginx) {
+
+  std::string dir = "/home/user/passes/pass_files/";
+  if (nginx) {
+    dir += "nginx/";
+  } else {
+    dir += "thttpd/";
+  }
+  //std::string file_path = "/home/user/passes/pass_files/orig_nginx_pin.log";
+  //std::string file_path2 = "/home/user/passes/pass_files/orig_nginx_llvm.log";
+  std::string file_path = dir + "orig_pin.log";
+  std::string file_path2 = dir + "orig_llvm_all_tests.log";
   // Open the file
   std::ifstream file(file_path);
 
@@ -520,235 +520,96 @@ bool DebloatPass::initTracedFuncNames() {
   return true;
 }
 
-
-
-/*********************    UNUSED FUNCTIONS -- DIDNT WORK    *********************/
-
-void DebloatPass::getCallsTo(std::set<llvm::Function *> funcs_to_delete, llvm::Module &M){
+bool DebloatPass::calculateFuncCycloComplexity(llvm::Module &M){
   for (Function &F : M){
-    for (auto &B : F){
-      for (auto &I : B){
-        CallBase   *CB = dyn_cast<CallBase>(&I);
-            CallInst   *CI = dyn_cast<CallInst>(&I);
-            InvokeInst *II = dyn_cast<InvokeInst>(&I);
-            if(CB){
-              Function *cf = CB->getCalledFunction();
-              auto it = funcs_to_delete.find(cf);
-              if (it != funcs_to_delete.end()){
-                std::string name = cf->getName().str();
-                #ifdef DEBUG
-                errs() << "Found call to function I need to delete\n";
-                errs() << "\t" << name << "\n";
-                #endif
-                del_insts[name].push_back(dyn_cast<Instruction>(&I));
-              }
-
-            }
+    if (F.isDeclaration())
+      continue;
+    int complexity = 1; // formula: M = D + 1 where D is decision points
+    for (BasicBlock &BB : F) {
+      Instruction *TI = BB.getTerminator();
+      // Check if the terminator instruction is a branch with multiple successors or a switch instruction
+      if (TI->getNumSuccessors() > 1 || isa<SwitchInst>(TI)) {
+          complexity++;
       }
     }
+    cyclo_complexity[F.getName().str()] = complexity;
+    //errs() << "Complexity of " << F.getName().str() << ": " << complexity << "\n";
   }
+  return false;
 }
 
-void DebloatPass::deleteCallsTo(std::string name){
-  auto it = del_insts.find(name);
-  if (it != del_insts.end()) {
-    for (Instruction* CB : it->second){
-      #ifdef DEBUG
-      errs() << "Replacing Instruction: " << *CB << "\n";
-      #endif
-      // Create an UndefValue with the same type as the result of the call
-      Value *Undef = UndefValue::get(CB->getType());
-
-      // Replace the CallInst with Undef
-      CB->replaceAllUsesWith(Undef);
-      #ifdef DEBUG
-      errs() << "\t with: " << *CB << "\n";
-      #endif
-
-      // Erase the CallInst from its parent basic block
-      CB->eraseFromParent();
-      #ifdef DEBUG
-      errs() << "\tInstruction erased.\n";
-      #endif
-
+void DebloatPass::getControlDeps(llvm::Module &M){
+  CallGraph CG = CallGraph(M);
+  // Perform a reverse topological sort using the SCCIterator
+  for (scc_iterator<CallGraph *> I = scc_begin(&CG); !I.isAtEnd(); ++I) {
+    const std::vector<CallGraphNode *> &SCC = *I;
+    
+    // SCC represents a Strongly Connected Component (a set of functions that call each other)
+    // Perform further analysis or actions based on SCC if needed
+    // Functions within the same SCC do not have a well-defined order, but they have dependencies on each other
+    errs() << "Functions in SCC:\n";
+    for (CallGraphNode *CGN : SCC) {
+      Function *F = CGN->getFunction();
+      if (F && !F->isDeclaration()) {
+        errs() << "\t" << F->getName().str() << "\n";
+      }
     }
-  } else {
-    #ifdef DEBUG
-    errs() << "No instructions in map\n";
-    #endif
   }
   return;
 }
 
-void DebloatPass::slowCallDeletion(llvm::Function *del_func, llvm::Module &M){
-for (Function &F : M){
-    for (auto &B : F){
-      for (auto &I : B){
-        CallBase   *CB = dyn_cast<CallBase>(&I);
-        CallInst   *CI = dyn_cast<CallInst>(&I);
-        InvokeInst *II = dyn_cast<InvokeInst>(&I);
-        if(CB){
-          Function *cf = CB->getCalledFunction();
-          if (cf == del_func){
-            std::string name = cf->getName().str();
-            #ifdef DEBUG
-            errs() << "Found call to " << name << "...deleting\n";
-            #endif
-            CB->removeFromParent();
-          }
+void DebloatPass::calculateCycloStats(){
+   std::vector<int> complexityValues;
+    for (const auto &entry : cyclo_complexity) {
+      //errs() << "Complexity Function: " << entry.first << ", Complexity Score: " << entry.second << "\n";
+        complexityValues.push_back(entry.second);
+    }
+    // Calculate mean
+    double mean = std::accumulate(complexityValues.begin(), complexityValues.end(), 0.0) / complexityValues.size();
 
+    // Calculate median
+    std::sort(complexityValues.begin(), complexityValues.end());
+    double median;
+    if (complexityValues.size() % 2 == 0) {
+        median = (complexityValues[complexityValues.size() / 2 - 1] + complexityValues[complexityValues.size() / 2]) / 2.0;
+    } else {
+        median = complexityValues[complexityValues.size() / 2];
+    }
+
+    // Calculate standard deviation
+    double sumSquaredDifferences = 0.0;
+    for (const auto &value : complexityValues) {
+        sumSquaredDifferences += std::pow(value - mean, 2);
+    }
+    double standardDeviation = std::sqrt(sumSquaredDifferences / complexityValues.size());
+  // Identify functions with complexity values outside 1 standard deviation
+    for (const auto &entry : cyclo_complexity) {
+        if (std::abs(entry.second - mean) > standardDeviation) {
+            cyclo_func_names.insert(entry.first);
+            //errs() << "Cyclo-Complexity: Keep " << entry.first << "\n"; 
+        }
+    }
+    
+}
+
+void DebloatPass::findSCCs(llvm::Module &M){
+  CallGraph CG(M);
+  for (scc_iterator<CallGraph *> I = scc_begin(&CG), E = scc_end(&CG); I != E; ++I) {
+    const std::vector<CallGraphNode *> &SCCNodes = *I;
+    // Check if any of the SCC nodes correspond to functions of interest
+    bool containsFunctionOfInterest = false;
+    for (CallGraphNode *Node : SCCNodes) {
+      if (Function *F = Node->getFunction()) {
+        // Check if the function is not in functionsOfInterest
+        if (std::find(traced_func_names.begin(), traced_func_names.end(), F->getName()) == traced_func_names.end()) {
+            // Add the function to the set
+            scc_funcs.insert(F);
+            scc_func_names.insert(F->getName().str());
+            //errs() << "Adding " << F->getName().str() << " to SCC set.\n";
         }
       }
     }
-  }
-}
-
-void deleteFunctionCalls_defuse(Function *F) {
-    for (auto UI = F->use_begin(), UE = F->use_end(); UI != UE; ) {
-        // Get the use
-        Use &U = *UI++;
-        CallBase *CB = dyn_cast<CallBase>(U.getUser());
-        CallInst *CI = dyn_cast<CallInst>(U.getUser());
-        InvokeInst *II = dyn_cast<InvokeInst>(U.getUser());
-
-        // Check if the use is a call or invoke instruction
-        if (CB){
-          #ifdef DEBUG
-          //errs() << "Found CallBase Use: " << *CB << "\n";
-          #endif
-          if (CI){
-            #ifdef DEBUG
-            errs() << "Called Function: " << CI->getCalledFunction()->getName().str() << "\n";
-            #endif
-            // Delete the call instruction
-            CI->eraseFromParent();
-            #ifdef DEBUG
-            errs() << "Erased Call Instruction\n";
-            #endif
-          }
-          else if (II){
-            #ifdef DEBUG
-            errs() << "Called Function: " << II->getCalledFunction()->getName().str() << "\n";
-            errs() << "Erased Invoke Instruction\n";
-            #endif
-            // Delete the invoke instruction
-            II->eraseFromParent();
-            #ifdef DEBUG
-            errs() << "Erased Invoke Instruction\n";
-            #endif
-          }
-        }
-    }
-}
-
-void findUsesOfFunction(Function *F) {
-  for (User *U : F->users()) {
-    if (Instruction *I = dyn_cast<Instruction>(U)) {
-      // I is an instruction that uses the function F
-      #ifdef DEBUG
-      errs() << "Found use: " << *I << "\n";
-      #endif
-      
-    }
-  }
-}
-
-void DebloatPass::getCallsTo_DefUse(std::set<std::string> funcs_to_delete, Module &M){
-  auto &CTX = M.getContext();
-  for (auto func_name : funcs_to_delete) {
-    Function *F = M.getFunction(func_name);
-    for (User *U : F->users()) {
-      if (Instruction *I = dyn_cast<Instruction>(U)) {
-        //instruction is in a function i wil delete anyways. 
-        //trying to delete after the function has been deleted will cause errors
-        if (funcs_to_delete.count(I->getFunction()->getName().str())){
-          #ifdef DEBUG
-          //errs() << "Instruction exists in a function marked for deletion. skipping.\n";
-          #endif
-          continue;
-        }
-
-        // I is an instruction that uses the function F
-        #ifdef DEBUG
-        //errs() << "Found use: " << *I << "\n";
-        #endif
-        /*
-        FunctionType *PlaceholderFuncType = FunctionType::get(Type::getVoidTy(CTX), false);
-        Function *PlaceholderFunc = Function::Create(PlaceholderFuncType, GlobalValue::ExternalLinkage, "placeholder_func", &M);
-
-        
-        
-        CallInst *CI = dyn_cast<CallInst>(I);
-        InvokeInst *II = dyn_cast<InvokeInst>(I);
-        if (CI) {
-            CI->setCalledFunction(PlaceholderFunc);
-            #ifdef DEBUG
-            errs() << "New inst: " << *CI << "\n";
-            #endif
-        } else if (II) {
-            II->setCalledFunction(PlaceholderFunc);
-            #ifdef DEBUG
-            errs() << "New inst: " << *II << "\n";
-            #endif
-        }
-        */
-        del_insts[F->getName().str()].push_back(I);
-      }
-    }
-  }
-
-  //iterate and chang all isntrcutions
-  /*
-  for (const auto &entry : del_insts) {
-    for (Instruction *inst : entry.second) {
-      Instruction *NopInst = BinaryOperator::Create(Instruction::BinaryOps::Add, ConstantInt::get(Type::getInt32Ty(CTX), 0), ConstantInt::get(Type::getInt32Ty(CTX), 0), "nop", inst);
-      ReplaceInstWithInst(inst, NopInst);
-      #ifdef DEBUG
-      errs() << "New inst: " << *inst << "\n";
-      errs() << "\treplacement: " << *NopInst << "\n";
-      #endif
-    }
-  }*/
-  
-}
-
-void DebloatPass::deleteCallsTo_DefUse(std::string name){
-  auto it = del_insts.find(name);
-  if (it != del_insts.end()) {
-    while (!it->second.empty()) {
-      Instruction* inst = it->second.back();
-      it->second.pop_back();
-      // Create an UndefValue with the same type as the result of the call
-      //Value *Undef = UndefValue::get(inst->getType());
-
-      // Replace the CallInst with Undef
-      //inst->replaceAllUsesWith(Undef);
-      #ifdef DEBUG
-      //errs() << "\t First replaced with Undef Value: " << *inst << "\n";
-      #endif
-      if (inst){
-        #ifdef DEBUG
-        errs() << "Erasing Instruction: " << *inst << "\n";
-        #endif
-        // Erase the CallInst from its parent basic block
-        inst->eraseFromParent();
-        #ifdef DEBUG
-        errs() << "\tInstruction erased.\n";
-        #endif
-      } else {
-        #ifdef DEBUG
-        errs() << "\tInstruction no longer referenced. Skipping deletion\n";
-        #endif
-        continue;
-      }
-
-    }
-  } else {
-    #ifdef DEBUG
-    errs() << "No instructions in map\n";
-    #endif
-  }
-  return;
+   }
 }
 
 // This is the core interface for pass plugins. It guarantees that 'opt' will

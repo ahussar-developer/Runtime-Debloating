@@ -8,8 +8,6 @@
 #include <map>
 #include <set>
 #include <string>
-#include <iostream>
-#include <fstream>
 
 class DebloatPass : public llvm::PassInfoMixin<DebloatPass> {
 public:
@@ -20,18 +18,23 @@ public:
   std::set<llvm::Function *> traced_funcs;
   std::set<std::string> static_module_func_names;
   std::set<llvm::Function *> static_module_funcs;
+  std::set<std::string> cyclo_func_names;
+  std::set<llvm::Function *> cyclo_funcs;
+  std::map<std::string, int> cyclo_complexity;
+  std::set<std::string> scc_func_names;
+  std::set<llvm::Function *> scc_funcs;
   
 
   std::map<std::string, std::vector<llvm::Instruction *>> del_insts;
 
-  bool initTracedFuncNames();
-  bool initStaticModuleFuncNames();
+  bool initTracedFuncNames(bool nginx);
+  bool initStaticModuleFuncNames(bool nginx);
   bool removeNonTracedFuncs(llvm::Module &M, llvm::ModuleAnalysisManager &MAM);
-  void getCallsTo(std::set<llvm::Function *> funcs_to_delete, llvm::Module &M);
-  void deleteCallsTo(std::string name);
-  void getCallsTo_DefUse(std::set<std::string> funcs_to_delete, llvm::Module &M);
-  void deleteCallsTo_DefUse(std::string name);
-  void slowCallDeletion(llvm::Function *F,llvm::Module &M);
+  bool calculateFuncCycloComplexity(llvm::Module &M);
+  void calculateCycloStats();
+  void findSCCs(llvm::Module &M);
+  void getControlDeps(llvm::Module &M);
+
   //void destroyFunction(llvm::Function *F, llvm::Constant *PrintfFormatStrVar, llvm::PointerType *PrintfArgTy, llvm::FunctionCallee Printf);
   void destroyFunction(llvm::Function *F);
   void printfAllFuncs(llvm::Module &M);

@@ -4,8 +4,13 @@ util_logs
 *.bc
 *.txt
 *.out
-build/
 test-utils.sh
+build/
+pass_files/
+SVF/
 py_scripts/*.log
 py_scripts/*.txt
 py_scripts/tags
+py_scripts/*.png
+py_scripts/*.svg
+DebloatPass/DebloatPass_errs.cpp

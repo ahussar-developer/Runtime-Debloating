@@ -73,8 +73,8 @@ def main():
 
     # Extract functions from the tags file
     function_dict = extract_functions_from_tags(tags_path)
-    for f, path in function_dict.items():
-        print(f)
+    #for f, path in function_dict.items():
+        #print(f)
     
     # List of functions to match
     function_list_1 = read_function_list(args.pin_funcs_file)
